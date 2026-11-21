@@ -1,138 +1,186 @@
-# Full-Stack Task Management System
+# Full-Stack Task Management System (WA-2 + WA-3 + WA-4 Deployment)
 
-A complete full-stack web application featuring an authenticated Node.js + Express REST API with SQLite database, paired with a modern, responsive React frontend built using Vite and React Router 6.
+A production-ready full-stack task management application with an authenticated Node.js Express REST API, hosted PostgreSQL database support, and a responsive React (Vite) single-page application.
 
 ---
 
-## 📂 Architecture Overview
+## 🌟 Live Deployment Architecture
+
+```
+┌─────────────────────────────────┐           ┌─────────────────────────────────┐
+│        Frontend (React)         │           │      Backend (Express API)      │
+│  Hosted on Vercel or Netlify    │  HTTPS    │     Hosted on Render or Railway │
+│  - React Router 6 (SPA)         │ ────────> │  - Express 5 + JWT Auth         │
+│  - Real-time client validation  │   CORS    │  - Node.js 22                   │
+│  - Dark-slate responsive theme  │           │  - Security & rate limits       │
+└─────────────────────────────────┘           └────────────────┬────────────────┘
+                                                               │
+                                                               │ SSL connection
+                                                               ▼
+                                              ┌─────────────────────────────────┐
+                                              │    Hosted Database (Postgres)   │
+                                              │  Render / Railway / Neon        │
+                                              │  - Foreign keys & Cascades      │
+                                              │  - Users & Tasks tables         │
+                                              └─────────────────────────────────┘
+```
+
+---
+
+## 📋 Project Structure
 
 ```
 Internship-Task2/
-├── backend/                  # Node.js + Express REST API
-│   ├── server.js             # API routes, middleware, SQLite DB & auth
-│   ├── test_api.js           # Automated integration test suite
-│   ├── .env                  # Environment variables (PORT, JWT_SECRET)
-│   ├── package.json          # Dependencies (express, bcryptjs, jsonwebtoken, cors)
-│   └── README.md             # Complete REST API endpoint documentation
+├── .gitignore                          # Ignores .env, node_modules, dist, *.db
+├── render.yaml                         # 1-Click Render Blueprint (API + Postgres)
+├── vercel.json                         # Vercel SPA rewrite configuration
+├── netlify.toml                        # Netlify build & redirect configuration
+├── README.md                           # Master setup & deployment guide
 │
-└── frontend/                 # React + Vite Frontend
-    ├── index.html            # HTML entry point with Inter font
-    ├── vite.config.js        # Vite config with API proxy
-    ├── package.json          # Dependencies (react, react-router-dom, lucide-react)
-    ├── README.md             # Frontend routes and architecture docs
+├── backend/                            # Express REST API
+│   ├── server.js                       # API routes, middleware, error handlers
+│   ├── db.js                           # Dual database adapter (PostgreSQL & SQLite)
+│   ├── test_api.js                     # Automated API integration test suite
+│   ├── .env.example                    # Template for environment variables
+│   ├── package.json                    # Dependencies: express, pg, bcryptjs, jsonwebtoken, cors
+│   └── README.md                       # API endpoint specifications
+│
+└── frontend/                           # React + Vite Client
+    ├── index.html                      # HTML entry with Inter font
+    ├── vite.config.js                  # Vite dev server with proxy
+    ├── vercel.json                     # Frontend Vercel rewrites
+    ├── public/_redirects               # Netlify SPA redirect rule (/* -> /index.html)
+    ├── package.json                    # Dependencies: react, react-router-dom, lucide-react
+    ├── README.md                       # Frontend components & routing guide
     └── src/
-        ├── context/          # AuthContext for user session & JWT management
-        ├── services/         # API client module wrapping native fetch
-        ├── components/       # Navbar, ProtectedRoute, LoadingSpinner, ErrorAlert, Modal
-        └── pages/            # TaskListPage, TaskDetailPage, TaskFormPage, Login, Register, 404
+        ├── context/AuthContext.jsx     # User auth state & JWT persistence
+        ├── services/api.js             # API client with URL normalization
+        ├── components/                 # Navbar, ProtectedRoute, Spinner, ErrorAlert, Modal
+        └── pages/                      # TaskListPage, TaskDetailPage, TaskFormPage, Login, Register, 404
 ```
 
 ---
 
-## 🛠 Features & Requirements Breakdown
+## 🚀 Step-by-Step Deployment Guide
 
-### 1. Backend REST API (Node.js + Express)
-- **Database**: SQLite using Node's built-in `node:sqlite` (`DatabaseSync`), storing users and tasks with foreign keys.
-- **Authentication**:
-  - `POST /api/auth/register`: Hashes passwords with `bcryptjs` (salt rounds: 12).
-  - `POST /api/auth/login`: Validates credentials and issues signed JWT bearer tokens (1 hour expiry).
-  - `GET /api/auth/me`: Validates token and returns current user profile.
-- **CRUD Task Endpoints**:
-  - `GET /api/tasks`: List all tasks belonging to the authenticated user.
-  - `GET /api/tasks/:id`: Retrieve single task by ID (returns 404 if not found or unauthorized).
-  - `POST /api/tasks`: Create new task with validation (title 1–200 chars, description <= 2000 chars, completed boolean).
-  - `PUT /api/tasks/:id`: Full update of an existing task.
-  - `PATCH /api/tasks/:id`: Partial update (e.g. toggle completion status).
-  - `DELETE /api/tasks/:id`: Delete task (returns 204 No Content).
-- **Protection**: JWT authentication middleware checks `Authorization: Bearer <token>`; rejects missing or invalid tokens with HTTP 401.
-- **Status Codes**: 200/201 on success, 400 for bad input / validation errors, 401 for unauthorized, 404 for not found, 409 for duplicate email.
-- **CORS Enabled**: Configured for cross-origin requests from the React frontend.
+### Step 1: Deploy Hosted Database & Backend (Render.com or Railway.app)
 
-### 2. Frontend Application (React + Vite)
-- **Routing**: React Router 6 with 6 distinct views:
-  1. `/tasks` — Task list view with search, filter (All / Pending / Completed), statistics dashboard, quick checkbox toggle, and delete dialog.
-  2. `/tasks/:id` — Detail view with timestamps, formatted description, status pill, and action buttons.
-  3. `/tasks/new` — Create task form with client-side validation and character counters.
-  4. `/tasks/:id/edit` — Edit task form with pre-populated data.
-  5. `/login` — User login form with input validation.
-  6. `/register` — Account registration form with password confirmation.
-  7. `*` — 404 Not Found page with return navigation.
-- **Data Fetching**: Pure REST API consumption using `fetch` via `src/services/api.js` (no hardcoded mock arrays).
-- **Loading & Error Handling**:
-  - Visible spinner animations while fetching or mutating data.
-  - Error alert banners with retry buttons on failure.
-  - Graceful degradation: handles network outages and server downtime without crashing.
-- **Client-Side Validation**:
-  - Real-time feedback and validation messages before submitting to API.
-  - Character counter boundaries (Title <= 200, Description <= 2000).
-- **Responsive Design**: Mobile-first design with responsive navbar drawer, flexible grid, and touch-friendly controls.
+#### Option A: Render.com (Recommended — Free Tier)
 
----
+1. **Log in to [Render.com](https://render.com/)** and link your GitHub account (`Saurabh-Singh33/Valentius-Task2`).
+2. **Create a PostgreSQL Database**:
+   - In Render Dashboard, click **New +** → **PostgreSQL**.
+   - **Name**: `taskmaster-db`
+   - **Database**: `taskmaster`
+   - **User**: `taskmaster_user`
+   - **Plan**: Free
+   - Click **Create Database**.
+   - Once provisioned, copy the **Internal Database URL** (if backend is on Render) or **External Database URL**.
+3. **Deploy the Backend Web Service**:
+   - In Render Dashboard, click **New +** → **Web Service**.
+   - Select your repository: `Valentius-Task2`.
+   - **Root Directory**: `backend`
+   - **Runtime**: `Node`
+   - **Build Command**: `npm install`
+   - **Start Command**: `npm start`
+   - Under **Environment Variables**, add:
+     - `PORT`: `3000` (or `10000`)
+     - `JWT_SECRET`: A long random secret string (e.g. `super_secret_jwt_key_9921287319`)
+     - `DATABASE_URL`: Paste the PostgreSQL connection URL from Step 2.
+   - Click **Create Web Service**.
+4. **Verify Backend**:
+   - Render will deploy the service and assign a URL: `https://<your-backend-name>.onrender.com`.
+   - Test it by visiting: `https://<your-backend-name>.onrender.com/api/health`
+   - You should receive:
+     ```json
+     {
+       "status": "ok",
+       "database": "postgresql",
+       "timestamp": "..."
+     }
+     ```
 
-## ⚡ How to Run the Project
-
-### Prerequisites
-- Node.js version **22.5.0 or higher** (e.g. Node v22.17.0)
+*(Alternatively, use Render Blueprints: In Render, select **Blueprints** and choose the repo; Render will automatically read `render.yaml` and provision both the PostgreSQL database and Web Service together!)*
 
 ---
 
-### Step 1: Start the Backend Server
+### Step 2: Deploy Frontend (Vercel or Netlify)
 
-```bash
-cd backend
-npm install
-npm start
-```
-The backend API will start on **http://localhost:3000**.
+#### Option A: Vercel (Recommended)
 
-> **Note**: To run backend integration tests:
-> ```bash
-> cd backend
-> npm test
-> ```
+1. **Log in to [Vercel.com](https://vercel.com/)** with your GitHub account.
+2. Click **Add New...** → **Project**.
+3. Import `Valentius-Task2`.
+4. Configure Project:
+   - **Framework Preset**: `Vite`
+   - **Root Directory**: Click edit and select `frontend`
+   - **Build Command**: `npm run build`
+   - **Output Directory**: `dist`
+5. **Set Environment Variables**:
+   - Add:
+     - **Key**: `VITE_API_URL`
+     - **Value**: `https://<your-backend-name>.onrender.com/api`
+6. Click **Deploy**.
+7. Vercel will build and publish your app at a URL such as: `https://<your-app-name>.vercel.app`.
 
----
+#### Option B: Netlify
 
-### Step 2: Start the Frontend Application
-
-Open a second terminal window:
-
-```bash
-cd frontend
-npm install
-npm run dev
-```
-The frontend will start at **http://localhost:5173**.
-
----
-
-### Step 3: Use the Application
-
-1. Open **http://localhost:5173** in your web browser.
-2. Click **Register** to create a test user (e.g. `user@example.com`, password: `password123`).
-3. You will be automatically logged in and redirected to your **Task Dashboard** (`/tasks`).
-4. Click **New Task** (`/tasks/new`) to add a task with title and optional description.
-5. In the dashboard, you can:
-   - Search tasks by keywords in title or description.
-   - Filter by status (`All`, `Pending`, `Completed`).
-   - Toggle completion status with the checkbox for immediate feedback.
-   - Click the eye icon (`/tasks/:id`) to inspect full details and timestamps.
-   - Click the edit icon (`/tasks/:id/edit`) to modify task content.
-   - Click the trash icon to delete with confirmation.
-6. Test error handling: stop the backend server (`Ctrl+C` in the backend terminal) and refresh the page; notice the user-friendly error message with a "Retry" button.
+1. **Log in to [Netlify.com](https://www.netlify.com/)**.
+2. Click **Add new site** → **Import an existing project** → GitHub (`Valentius-Task2`).
+3. Set Build Settings:
+   - **Base directory**: `frontend`
+   - **Build command**: `npm run build`
+   - **Publish directory**: `frontend/dist`
+4. Set Environment Variables:
+   - `VITE_API_URL`: `https://<your-backend-name>.onrender.com/api`
+5. Click **Deploy site**.
+6. The included `_redirects` and `netlify.toml` automatically prevent 404s when refreshing client routes.
 
 ---
 
-## 📋 REST API Reference Summary
+### Step 3: End-to-End Verification Checklist
 
-| Method | Endpoint | Auth | Request Body | Description |
-|---|---|---|---|---|
-| `POST` | `/api/auth/register` | No | `{ email, password }` | Register new user |
-| `POST` | `/api/auth/login` | No | `{ email, password }` | Login and get JWT |
-| `GET` | `/api/auth/me` | Yes | None | Get current user info |
-| `GET` | `/api/tasks` | Yes | None | List user's tasks |
-| `GET` | `/api/tasks/:id` | Yes | None | Get task by ID |
-| `POST` | `/api/tasks` | Yes | `{ title, description?, completed? }` | Create new task |
-| `PUT` | `/api/tasks/:id` | Yes | `{ title, description?, completed? }` | Replace entire task |
-| `PATCH` | `/api/tasks/:id` | Yes | `{ title?, description?, completed? }` | Partial task update |
-| `DELETE` | `/api/tasks/:id` | Yes | None | Delete task |
+Once both services are deployed, test the full application flow on the live frontend URL:
+
+1. **Registration**:
+   - Navigate to `/register`.
+   - Create a new account with email and password.
+   - Confirm successful registration and automatic login.
+2. **Dashboard & State**:
+   - Verify task stats show 0 tasks.
+   - Check that no console CORS errors occur in DevTools.
+3. **Create Task**:
+   - Click **New Task** (`/tasks/new`).
+   - Enter a title and description.
+   - Click **Create Task** and verify it redirects to the new task detail page.
+4. **Read & Detail View**:
+   - View the task in `/tasks/:id`.
+   - Verify title, description, status badge, and timestamps.
+5. **Update Task**:
+   - Click **Mark as Complete** (or toggle checkbox in `/tasks`).
+   - Click **Edit** (`/tasks/:id/edit`), modify the description, and save.
+6. **Search & Filter**:
+   - Add a second task.
+   - Test the live search bar and status filter buttons (`All`, `Pending`, `Completed`).
+7. **Delete Task**:
+   - Click the delete icon.
+   - Confirm deletion in the modal dialog.
+   - Ensure the task is removed from the database.
+8. **Refresh Test**:
+   - Refresh while on `/tasks` or `/tasks/:id` to confirm client-side routing rewrites work properly without 404 errors.
+9. **Logout & Protected Routes**:
+   - Click **Logout**.
+   - Attempt to access `/tasks` directly; verify automatic redirection to `/login`.
+
+---
+
+## 🔒 Security & Environment Variables
+
+Never commit `.env` files to git. Set all credentials in the hosting dashboards:
+
+| Environment Variable | Where to Set | Description |
+|---|---|---|
+| `DATABASE_URL` | Backend Dashboard (Render / Railway) | Connection string for PostgreSQL |
+| `JWT_SECRET` | Backend Dashboard (Render / Railway) | Random 32+ character signing key |
+| `PORT` | Backend Dashboard (Render / Railway) | Defaults to `3000` or platform port |
+| `VITE_API_URL` | Frontend Dashboard (Vercel / Netlify) | Live backend API URL (`https://.../api`) |

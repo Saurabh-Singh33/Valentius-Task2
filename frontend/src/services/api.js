@@ -1,4 +1,16 @@
-const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3000/api';
+const getApiBaseUrl = () => {
+  const envUrl = import.meta.env.VITE_API_URL;
+  if (!envUrl) {
+    // Default fallback: relative '/api' (for Vite proxy) or localhost
+    return typeof window !== 'undefined' && window.location.hostname === 'localhost'
+      ? '/api'
+      : 'http://localhost:3000/api';
+  }
+  const trimmed = envUrl.trim().replace(/\/+$/, '');
+  return trimmed.endsWith('/api') ? trimmed : `${trimmed}/api`;
+};
+
+const API_BASE_URL = getApiBaseUrl();
 
 /**
  * Helper to make HTTP requests with automatic auth headers and error handling

@@ -4,35 +4,24 @@ const express = require("express");
 const cors = require("cors");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
-const { DatabaseSync } = require("node:sqlite");
+const db = require("./db");
 
 if (!process.env.JWT_SECRET) {
   throw new Error("JWT_SECRET must be set in the environment");
 }
 
 const app = express();
-const db = new DatabaseSync("tasks.db");
 const jwtSecret = process.env.JWT_SECRET;
 
-db.exec(`
-  PRAGMA foreign_keys = ON;
-  CREATE TABLE IF NOT EXISTS users (
-    id INTEGER PRIMARY KEY,
-    email TEXT NOT NULL UNIQUE,
-    password_hash TEXT NOT NULL
-  );
-  CREATE TABLE IF NOT EXISTS tasks (
-    id INTEGER PRIMARY KEY,
-    user_id INTEGER NOT NULL REFERENCES users(id),
-    title TEXT NOT NULL,
-    description TEXT NOT NULL DEFAULT '',
-    completed INTEGER NOT NULL DEFAULT 0,
-    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-  );
-`);
+// CORS configuration allowing frontend clients (Vercel, Netlify, localhost)
+app.use(
+  cors({
+    origin: "*",
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+  })
+);
 
-app.use(cors());
 app.use(express.json({ limit: "10kb" }));
 
 function sendError(res, status, message) {
@@ -41,7 +30,11 @@ function sendError(res, status, message) {
 
 function validateCredentials(req, res, next) {
   const { email, password } = req.body ?? {};
-  if (typeof email !== "string" || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()) || email.length > 254) {
+  if (
+    typeof email !== "string" ||
+    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim()) ||
+    email.length > 254
+  ) {
     return sendError(res, 400, "A valid email is required");
   }
   if (
@@ -90,27 +83,35 @@ function createToken(user) {
   return jwt.sign({ sub: user.id }, jwtSecret, { expiresIn: "1h" });
 }
 
-function formatTask(task) {
-  return {
-    id: task.id,
-    title: task.title,
-    description: task.description,
-    completed: Boolean(task.completed),
-    createdAt: task.created_at,
-    updatedAt: task.updated_at,
-  };
-}
+// Health check endpoint for Render / Railway / status monitoring
+app.get("/api/health", (req, res) => {
+  res.json({
+    status: "ok",
+    database: db.isPostgres ? "postgresql" : "sqlite",
+    timestamp: new Date().toISOString(),
+  });
+});
 
+app.get("/", (req, res) => {
+  res.json({
+    message: "Task API is running",
+    endpoints: {
+      health: "/api/health",
+      register: "POST /api/auth/register",
+      login: "POST /api/auth/login",
+      tasks: "/api/tasks",
+    },
+  });
+});
+
+// Authentication endpoints
 app.post("/api/auth/register", validateCredentials, async (req, res, next) => {
   try {
     const passwordHash = await bcrypt.hash(req.credentials.password, 12);
-    const result = db
-      .prepare("INSERT INTO users (email, password_hash) VALUES (?, ?)")
-      .run(req.credentials.email, passwordHash);
-    const user = { id: Number(result.lastInsertRowid), email: req.credentials.email };
+    const user = await db.createUser(req.credentials.email, passwordHash);
     return res.status(201).json({ user, token: createToken(user) });
   } catch (error) {
-    if (error.code === "SQLITE_CONSTRAINT_UNIQUE") {
+    if (error.code === "SQLITE_CONSTRAINT_UNIQUE" || error.code === "23505") {
       return sendError(res, 409, "Email is already registered");
     }
     return next(error);
@@ -119,7 +120,7 @@ app.post("/api/auth/register", validateCredentials, async (req, res, next) => {
 
 app.post("/api/auth/login", validateCredentials, async (req, res, next) => {
   try {
-    const user = db.prepare("SELECT * FROM users WHERE email = ?").get(req.credentials.email);
+    const user = await db.findUserByEmail(req.credentials.email);
     if (!user || !(await bcrypt.compare(req.credentials.password, user.password_hash))) {
       return sendError(res, 401, "Invalid email or password");
     }
@@ -130,104 +131,118 @@ app.post("/api/auth/login", validateCredentials, async (req, res, next) => {
   }
 });
 
-app.get("/api/auth/me", authenticate, (req, res) => {
-  const user = db.prepare("SELECT id, email FROM users WHERE id = ?").get(req.userId);
-  if (!user) return sendError(res, 404, "User not found");
-  res.json({ user });
+app.get("/api/auth/me", authenticate, async (req, res, next) => {
+  try {
+    const user = await db.findUserById(req.userId);
+    if (!user) return sendError(res, 404, "User not found");
+    res.json({ user });
+  } catch (error) {
+    return next(error);
+  }
 });
 
+// Protected Task Routes
 app.use("/api/tasks", authenticate);
 
-app.get("/api/tasks", (req, res) => {
-  const tasks = db
-    .prepare("SELECT * FROM tasks WHERE user_id = ? ORDER BY id")
-    .all(req.userId)
-    .map(formatTask);
-  res.json({ tasks });
-});
-
-app.get("/api/tasks/:id", (req, res) => {
-  const task = db
-    .prepare("SELECT * FROM tasks WHERE id = ? AND user_id = ?")
-    .get(req.params.id, req.userId);
-  if (!task) return sendError(res, 404, "Task not found");
-  res.json({ task: formatTask(task) });
-});
-
-app.post("/api/tasks", validateTask, (req, res) => {
-  const result = db
-    .prepare(
-      "INSERT INTO tasks (user_id, title, description, completed) VALUES (?, ?, ?, ?)",
-    )
-    .run(req.userId, req.task.title, req.task.description, Number(req.task.completed));
-  const task = db.prepare("SELECT * FROM tasks WHERE id = ?").get(result.lastInsertRowid);
-  res.status(201).json({ task: formatTask(task) });
-});
-
-app.put("/api/tasks/:id", validateTask, (req, res) => {
-  const result = db
-    .prepare(`
-      UPDATE tasks
-      SET title = ?, description = ?, completed = ?, updated_at = CURRENT_TIMESTAMP
-      WHERE id = ? AND user_id = ?
-    `)
-    .run(req.task.title, req.task.description, Number(req.task.completed), req.params.id, req.userId);
-  if (!result.changes) return sendError(res, 404, "Task not found");
-
-  const task = db
-    .prepare("SELECT * FROM tasks WHERE id = ? AND user_id = ?")
-    .get(req.params.id, req.userId);
-  res.json({ task: formatTask(task) });
-});
-
-app.patch("/api/tasks/:id", (req, res) => {
-  const existing = db
-    .prepare("SELECT * FROM tasks WHERE id = ? AND user_id = ?")
-    .get(req.params.id, req.userId);
-  if (!existing) return sendError(res, 404, "Task not found");
-
-  const title = req.body?.title !== undefined ? req.body.title : existing.title;
-  const description = req.body?.description !== undefined ? req.body.description : existing.description;
-  const completed = req.body?.completed !== undefined ? req.body.completed : Boolean(existing.completed);
-
-  if (typeof title !== "string" || !title.trim() || title.trim().length > 200) {
-    return sendError(res, 400, "Title is required and must be 200 characters or fewer");
+app.get("/api/tasks", async (req, res, next) => {
+  try {
+    const tasks = await db.getTasks(req.userId);
+    res.json({ tasks });
+  } catch (error) {
+    return next(error);
   }
-  if (typeof description !== "string" || description.length > 2000) {
-    return sendError(res, 400, "Description must be a string of 2000 characters or fewer");
-  }
-  if (typeof completed !== "boolean") {
-    return sendError(res, 400, "Completed must be a boolean");
-  }
-
-  db.prepare(`
-    UPDATE tasks
-    SET title = ?, description = ?, completed = ?, updated_at = CURRENT_TIMESTAMP
-    WHERE id = ? AND user_id = ?
-  `).run(title.trim(), description, Number(completed), req.params.id, req.userId);
-
-  const task = db
-    .prepare("SELECT * FROM tasks WHERE id = ? AND user_id = ?")
-    .get(req.params.id, req.userId);
-  res.json({ task: formatTask(task) });
 });
 
-app.delete("/api/tasks/:id", (req, res) => {
-  const result = db
-    .prepare("DELETE FROM tasks WHERE id = ? AND user_id = ?")
-    .run(req.params.id, req.userId);
-  if (!result.changes) return sendError(res, 404, "Task not found");
-  res.status(204).end();
+app.get("/api/tasks/:id", async (req, res, next) => {
+  try {
+    const task = await db.getTaskById(req.params.id, req.userId);
+    if (!task) return sendError(res, 404, "Task not found");
+    res.json({ task });
+  } catch (error) {
+    return next(error);
+  }
 });
 
+app.post("/api/tasks", validateTask, async (req, res, next) => {
+  try {
+    const task = await db.createTask(req.userId, req.task);
+    res.status(201).json({ task });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+app.put("/api/tasks/:id", validateTask, async (req, res, next) => {
+  try {
+    const task = await db.updateTask(req.params.id, req.userId, req.task);
+    if (!task) return sendError(res, 404, "Task not found");
+    res.json({ task });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+app.patch("/api/tasks/:id", async (req, res, next) => {
+  try {
+    const existing = await db.getTaskById(req.params.id, req.userId);
+    if (!existing) return sendError(res, 404, "Task not found");
+
+    const title = req.body?.title !== undefined ? req.body.title : existing.title;
+    const description = req.body?.description !== undefined ? req.body.description : existing.description;
+    const completed = req.body?.completed !== undefined ? req.body.completed : Boolean(existing.completed);
+
+    if (typeof title !== "string" || !title.trim() || title.trim().length > 200) {
+      return sendError(res, 400, "Title is required and must be 200 characters or fewer");
+    }
+    if (typeof description !== "string" || description.length > 2000) {
+      return sendError(res, 400, "Description must be a string of 2000 characters or fewer");
+    }
+    if (typeof completed !== "boolean") {
+      return sendError(res, 400, "Completed must be a boolean");
+    }
+
+    const task = await db.updateTask(req.params.id, req.userId, {
+      title: title.trim(),
+      description,
+      completed,
+    });
+    res.json({ task });
+  } catch (error) {
+    return next(error);
+  }
+});
+
+app.delete("/api/tasks/:id", async (req, res, next) => {
+  try {
+    const deleted = await db.deleteTask(req.params.id, req.userId);
+    if (!deleted) return sendError(res, 404, "Task not found");
+    res.status(204).end();
+  } catch (error) {
+    return next(error);
+  }
+});
+
+// Error handling middleware
 app.use((err, req, res, next) => {
   if (res.headersSent) return next(err);
   if (err instanceof SyntaxError && err.status === 400 && "body" in err) {
     return sendError(res, 400, "Request body must be valid JSON");
   }
-  console.error(err);
+  console.error("Unhandled error:", err);
   return sendError(res, 500, "Internal server error");
 });
 
 const port = Number(process.env.PORT) || 3000;
-app.listen(port, () => console.log(`Task API listening on port ${port}`));
+
+// Initialize database and start server
+async function startServer() {
+  try {
+    await db.initDb();
+    app.listen(port, () => console.log(`Task API listening on port ${port}`));
+  } catch (err) {
+    console.error("Failed to initialize database:", err);
+    process.exit(1);
+  }
+}
+
+startServer();
