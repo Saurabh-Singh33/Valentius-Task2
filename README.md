@@ -1,116 +1,138 @@
-# Minimal Task API
+# Full-Stack Task Management System
 
-A Node.js 22.5+ REST API built with Express, SQLite, bcrypt password hashing, and JWT authentication.
-It uses Node's built-in `node:sqlite` module, which is experimental in Node 22.
+A complete full-stack web application featuring an authenticated Node.js + Express REST API with SQLite database, paired with a modern, responsive React frontend built using Vite and React Router 6.
 
-## Setup
+---
 
-```sh
-npm install
+## 📂 Architecture Overview
+
+```
+Internship-Task2/
+├── backend/                  # Node.js + Express REST API
+│   ├── server.js             # API routes, middleware, SQLite DB & auth
+│   ├── test_api.js           # Automated integration test suite
+│   ├── .env                  # Environment variables (PORT, JWT_SECRET)
+│   ├── package.json          # Dependencies (express, bcryptjs, jsonwebtoken, cors)
+│   └── README.md             # Complete REST API endpoint documentation
+│
+└── frontend/                 # React + Vite Frontend
+    ├── index.html            # HTML entry point with Inter font
+    ├── vite.config.js        # Vite config with API proxy
+    ├── package.json          # Dependencies (react, react-router-dom, lucide-react)
+    ├── README.md             # Frontend routes and architecture docs
+    └── src/
+        ├── context/          # AuthContext for user session & JWT management
+        ├── services/         # API client module wrapping native fetch
+        ├── components/       # Navbar, ProtectedRoute, LoadingSpinner, ErrorAlert, Modal
+        └── pages/            # TaskListPage, TaskDetailPage, TaskFormPage, Login, Register, 404
 ```
 
-Copy `.env.example` to `.env` and set `JWT_SECRET` to a long, random value. Then start the API:
+---
 
-```sh
+## 🛠 Features & Requirements Breakdown
+
+### 1. Backend REST API (Node.js + Express)
+- **Database**: SQLite using Node's built-in `node:sqlite` (`DatabaseSync`), storing users and tasks with foreign keys.
+- **Authentication**:
+  - `POST /api/auth/register`: Hashes passwords with `bcryptjs` (salt rounds: 12).
+  - `POST /api/auth/login`: Validates credentials and issues signed JWT bearer tokens (1 hour expiry).
+  - `GET /api/auth/me`: Validates token and returns current user profile.
+- **CRUD Task Endpoints**:
+  - `GET /api/tasks`: List all tasks belonging to the authenticated user.
+  - `GET /api/tasks/:id`: Retrieve single task by ID (returns 404 if not found or unauthorized).
+  - `POST /api/tasks`: Create new task with validation (title 1–200 chars, description <= 2000 chars, completed boolean).
+  - `PUT /api/tasks/:id`: Full update of an existing task.
+  - `PATCH /api/tasks/:id`: Partial update (e.g. toggle completion status).
+  - `DELETE /api/tasks/:id`: Delete task (returns 204 No Content).
+- **Protection**: JWT authentication middleware checks `Authorization: Bearer <token>`; rejects missing or invalid tokens with HTTP 401.
+- **Status Codes**: 200/201 on success, 400 for bad input / validation errors, 401 for unauthorized, 404 for not found, 409 for duplicate email.
+- **CORS Enabled**: Configured for cross-origin requests from the React frontend.
+
+### 2. Frontend Application (React + Vite)
+- **Routing**: React Router 6 with 6 distinct views:
+  1. `/tasks` — Task list view with search, filter (All / Pending / Completed), statistics dashboard, quick checkbox toggle, and delete dialog.
+  2. `/tasks/:id` — Detail view with timestamps, formatted description, status pill, and action buttons.
+  3. `/tasks/new` — Create task form with client-side validation and character counters.
+  4. `/tasks/:id/edit` — Edit task form with pre-populated data.
+  5. `/login` — User login form with input validation.
+  6. `/register` — Account registration form with password confirmation.
+  7. `*` — 404 Not Found page with return navigation.
+- **Data Fetching**: Pure REST API consumption using `fetch` via `src/services/api.js` (no hardcoded mock arrays).
+- **Loading & Error Handling**:
+  - Visible spinner animations while fetching or mutating data.
+  - Error alert banners with retry buttons on failure.
+  - Graceful degradation: handles network outages and server downtime without crashing.
+- **Client-Side Validation**:
+  - Real-time feedback and validation messages before submitting to API.
+  - Character counter boundaries (Title <= 200, Description <= 2000).
+- **Responsive Design**: Mobile-first design with responsive navbar drawer, flexible grid, and touch-friendly controls.
+
+---
+
+## ⚡ How to Run the Project
+
+### Prerequisites
+- Node.js version **22.5.0 or higher** (e.g. Node v22.17.0)
+
+---
+
+### Step 1: Start the Backend Server
+
+```bash
+cd backend
+npm install
 npm start
 ```
+The backend API will start on **http://localhost:3000**.
 
-The server listens on port `3000` by default. Set `PORT` to change it. SQLite creates `tasks.db` in the current directory on first start.
+> **Note**: To run backend integration tests:
+> ```bash
+> cd backend
+> npm test
+> ```
 
-## Authentication
+---
 
-Register or log in to receive a JWT. Send it on every task request as:
+### Step 2: Start the Frontend Application
 
-```http
-Authorization: Bearer <token>
+Open a second terminal window:
+
+```bash
+cd frontend
+npm install
+npm run dev
 ```
+The frontend will start at **http://localhost:5173**.
 
-Tokens expire after one hour. Users can access only their own tasks.
+---
 
-## Endpoints
+### Step 3: Use the Application
 
-All request and response bodies use JSON except `DELETE`, which returns an empty `204` response. Error responses have the shape `{ "error": "message" }`.
+1. Open **http://localhost:5173** in your web browser.
+2. Click **Register** to create a test user (e.g. `user@example.com`, password: `password123`).
+3. You will be automatically logged in and redirected to your **Task Dashboard** (`/tasks`).
+4. Click **New Task** (`/tasks/new`) to add a task with title and optional description.
+5. In the dashboard, you can:
+   - Search tasks by keywords in title or description.
+   - Filter by status (`All`, `Pending`, `Completed`).
+   - Toggle completion status with the checkbox for immediate feedback.
+   - Click the eye icon (`/tasks/:id`) to inspect full details and timestamps.
+   - Click the edit icon (`/tasks/:id/edit`) to modify task content.
+   - Click the trash icon to delete with confirmation.
+6. Test error handling: stop the backend server (`Ctrl+C` in the backend terminal) and refresh the page; notice the user-friendly error message with a "Retry" button.
 
-### Register
+---
 
-`POST /api/auth/register` — public.
+## 📋 REST API Reference Summary
 
-Request:
-
-```json
-{ "email": "sam@example.com", "password": "securepass123" }
-```
-
-Email must be valid; password must be 8–72 UTF-8 bytes.
-
-Success (`201`):
-
-```json
-{
-  "user": { "id": 1, "email": "sam@example.com" },
-  "token": "<jwt>"
-}
-```
-
-Returns `400` for invalid input and `409` if the email is already registered.
-
-### Log in
-
-`POST /api/auth/login` — public.
-
-Request uses the same fields as registration. Success (`200`) returns the same `{ "user", "token" }` shape. Returns `400` for invalid input and `401` for incorrect credentials.
-
-### List tasks
-
-`GET /api/tasks` — requires authentication.
-
-Success (`200`):
-
-```json
-{
-  "tasks": [
-    {
-      "id": 1,
-      "title": "Read a book",
-      "description": "",
-      "completed": false,
-      "createdAt": "2026-01-01 12:00:00",
-      "updatedAt": "2026-01-01 12:00:00"
-    }
-  ]
-}
-```
-
-### Get a task
-
-`GET /api/tasks/:id` — requires authentication.
-
-Success (`200`): `{ "task": { ... } }`, using the task shape above. Returns `404` if the task does not exist or belongs to another user.
-
-### Create a task
-
-`POST /api/tasks` — requires authentication.
-
-Request:
-
-```json
-{ "title": "Read a book", "description": "Chapter one", "completed": false }
-```
-
-`title` is required (1–200 characters); `description` is optional (up to 2000 characters, defaults to an empty string); `completed` is optional (boolean, defaults to `false`).
-
-Success (`201`): `{ "task": { ... } }`. Returns `400` for invalid input.
-
-### Replace a task
-
-`PUT /api/tasks/:id` — requires authentication.
-
-Request uses the same fields and validation as task creation; omitted optional fields use their defaults. Success (`200`): `{ "task": { ... } }`. Returns `400` for invalid input and `404` if the task does not exist or belongs to another user.
-
-### Delete a task
-
-`DELETE /api/tasks/:id` — requires authentication.
-
-Success: empty response (`204`). Returns `404` if the task does not exist or belongs to another user.
-
-Protected endpoints return `401` when the bearer token is missing, invalid, or expired. Malformed JSON returns `400`.
+| Method | Endpoint | Auth | Request Body | Description |
+|---|---|---|---|---|
+| `POST` | `/api/auth/register` | No | `{ email, password }` | Register new user |
+| `POST` | `/api/auth/login` | No | `{ email, password }` | Login and get JWT |
+| `GET` | `/api/auth/me` | Yes | None | Get current user info |
+| `GET` | `/api/tasks` | Yes | None | List user's tasks |
+| `GET` | `/api/tasks/:id` | Yes | None | Get task by ID |
+| `POST` | `/api/tasks` | Yes | `{ title, description?, completed? }` | Create new task |
+| `PUT` | `/api/tasks/:id` | Yes | `{ title, description?, completed? }` | Replace entire task |
+| `PATCH` | `/api/tasks/:id` | Yes | `{ title?, description?, completed? }` | Partial task update |
+| `DELETE` | `/api/tasks/:id` | Yes | None | Delete task |

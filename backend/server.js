@@ -1,6 +1,7 @@
 require("dotenv").config();
 
 const express = require("express");
+const cors = require("cors");
 const bcrypt = require("bcryptjs");
 const jwt = require("jsonwebtoken");
 const { DatabaseSync } = require("node:sqlite");
@@ -31,6 +32,7 @@ db.exec(`
   );
 `);
 
+app.use(cors());
 app.use(express.json({ limit: "10kb" }));
 
 function sendError(res, status, message) {
@@ -128,6 +130,12 @@ app.post("/api/auth/login", validateCredentials, async (req, res, next) => {
   }
 });
 
+app.get("/api/auth/me", authenticate, (req, res) => {
+  const user = db.prepare("SELECT id, email FROM users WHERE id = ?").get(req.userId);
+  if (!user) return sendError(res, 404, "User not found");
+  res.json({ user });
+});
+
 app.use("/api/tasks", authenticate);
 
 app.get("/api/tasks", (req, res) => {
@@ -165,6 +173,38 @@ app.put("/api/tasks/:id", validateTask, (req, res) => {
     `)
     .run(req.task.title, req.task.description, Number(req.task.completed), req.params.id, req.userId);
   if (!result.changes) return sendError(res, 404, "Task not found");
+
+  const task = db
+    .prepare("SELECT * FROM tasks WHERE id = ? AND user_id = ?")
+    .get(req.params.id, req.userId);
+  res.json({ task: formatTask(task) });
+});
+
+app.patch("/api/tasks/:id", (req, res) => {
+  const existing = db
+    .prepare("SELECT * FROM tasks WHERE id = ? AND user_id = ?")
+    .get(req.params.id, req.userId);
+  if (!existing) return sendError(res, 404, "Task not found");
+
+  const title = req.body?.title !== undefined ? req.body.title : existing.title;
+  const description = req.body?.description !== undefined ? req.body.description : existing.description;
+  const completed = req.body?.completed !== undefined ? req.body.completed : Boolean(existing.completed);
+
+  if (typeof title !== "string" || !title.trim() || title.trim().length > 200) {
+    return sendError(res, 400, "Title is required and must be 200 characters or fewer");
+  }
+  if (typeof description !== "string" || description.length > 2000) {
+    return sendError(res, 400, "Description must be a string of 2000 characters or fewer");
+  }
+  if (typeof completed !== "boolean") {
+    return sendError(res, 400, "Completed must be a boolean");
+  }
+
+  db.prepare(`
+    UPDATE tasks
+    SET title = ?, description = ?, completed = ?, updated_at = CURRENT_TIMESTAMP
+    WHERE id = ? AND user_id = ?
+  `).run(title.trim(), description, Number(completed), req.params.id, req.userId);
 
   const task = db
     .prepare("SELECT * FROM tasks WHERE id = ? AND user_id = ?")
